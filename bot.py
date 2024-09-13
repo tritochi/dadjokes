@@ -1,26 +1,30 @@
-import os
+import asyncio
 import logging
+import os
+import uvicorn
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, Response
+from starlette.routing import Route
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, ContextTypes
 import requests
-from flask import Flask, request
 
-# Use environment variable for API key
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("No API token found. Please set the TELEGRAM_BOT_TOKEN environment variable.")
-
-# Set up logging
+# Enable logging
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+# Define configuration constants
+URL = os.environ.get("RENDER_EXTERNAL_URL")
+PORT = int(os.environ.get("PORT", 8000))
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 ICANHAZDADJOKE_API = "https://icanhazdadjoke.com/"
 HEADERS = {
     'Accept': 'application/json',
     'User-Agent': 'Telegram Dad Joke Bot (https://t.me/dadjokezbot)'
 }
-
-app = Flask(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Start command received from user {update.effective_user.id}")
@@ -71,19 +75,42 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logger.error(f"Error in inline query: {str(e)}")
 
-application = Application.builder().token(BOT_TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(InlineQueryHandler(inline_query))
+async def main() -> None:
+    application = Application.builder().token(TOKEN).updater(None).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(InlineQueryHandler(inline_query))
 
-@app.route('/' + BOT_TOKEN, methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(), application.bot)
-    application.process_update(update)
-    return 'OK'
+    await application.bot.set_webhook(url=f"{URL}/telegram", allowed_updates=Update.ALL_TYPES)
 
-@app.route('/')
-def index():
-    return 'Hello, Dad Joke Bot is running!'
+    async def telegram(request: Request) -> Response:
+        await application.update_queue.put(
+            Update.de_json(data=await request.json(), bot=application.bot)
+        )
+        return Response()
 
-if __name__ == '__main__':
-    app.run(port=int(os.environ.get('PORT', 5000)))
+    async def health(_: Request) -> PlainTextResponse:
+        return PlainTextResponse(content="The bot is still running fine!")
+
+    starlette_app = Starlette(
+        routes=[
+            Route("/telegram", telegram, methods=["POST"]),
+            Route("/healthcheck", health, methods=["GET"]),
+        ]
+    )
+
+    webserver = uvicorn.Server(
+        config=uvicorn.Config(
+            app=starlette_app,
+            port=PORT,
+            use_colors=False,
+            host="0.0.0.0",
+        )
+    )
+
+    async with application:
+        await application.start()
+        await webserver.serve()
+        await application.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())

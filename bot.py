@@ -5,7 +5,7 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
+from telegram import Update
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, ContextTypes
 import requests
 
@@ -22,7 +22,7 @@ WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 if not WEBHOOK_URL:
     raise ValueError("No WEBHOOK_URL provided")
 
-PORT = int(os.getenv("PORT", "8080"))
+PORT = int(os.getenv("PORT", "10000"))
 
 ICANHAZDADJOKE_API = "https://icanhazdadjoke.com/"
 HEADERS = {
@@ -100,11 +100,14 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(InlineQueryHandler(inline_query))
 
 async def main():
+    await application.initialize()  # Initialize the application
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/telegram")
     await application.start()
+    
     config = uvicorn.Config(app=app, port=PORT, host="0.0.0.0")
     server = uvicorn.Server(config)
     await server.serve()
+    
     await application.stop()
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import logging
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, ContextTypes
 import requests
+from flask import Flask, request
 
 # Use environment variable for API key
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -18,6 +19,8 @@ HEADERS = {
     'Accept': 'application/json',
     'User-Agent': 'Telegram Dad Joke Bot (https://t.me/dadjokezbot)'
 }
+
+app = Flask(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info(f"Start command received from user {update.effective_user.id}")
@@ -68,11 +71,19 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logger.error(f"Error in inline query: {str(e)}")
 
-def main() -> None:
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(InlineQueryHandler(inline_query))
-    application.run_polling()
+application = Application.builder().token(BOT_TOKEN).build()
+application.add_handler(CommandHandler("start", start))
+application.add_handler(InlineQueryHandler(inline_query))
+
+@app.route('/' + BOT_TOKEN, methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(), application.bot)
+    application.process_update(update)
+    return 'OK'
+
+@app.route('/')
+def index():
+    return 'Hello, Dad Joke Bot is running!'
 
 if __name__ == '__main__':
-    main()
+    app.run(port=int(os.environ.get('PORT', 5000)))
